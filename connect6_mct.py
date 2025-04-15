@@ -1,6 +1,9 @@
 import sys
 import numpy as np
 import random
+import mcts
+from time import sleep
+
 
 class Connect6Game:
     def __init__(self, size=19):
@@ -8,12 +11,14 @@ class Connect6Game:
         self.board = np.zeros((size, size), dtype=int)  # 0: Empty, 1: Black, 2: White
         self.turn = 1  # 1: Black, 2: White
         self.game_over = False
+        self.first_move = True
 
     def reset_board(self):
         """Clears the board and resets the game."""
         self.board.fill(0)
         self.turn = 1
         self.game_over = False
+        self.first_move = True
         print("= ", flush=True)
     def set_board_size(self, size):
         """Sets the board size and resets the game."""
@@ -21,6 +26,7 @@ class Connect6Game:
         self.board = np.zeros((size, size), dtype=int)
         self.turn = 1
         self.game_over = False
+        self.first_move = True
         print("= ", flush=True)
     def check_win(self):
         """Checks if a player has won.
@@ -103,19 +109,53 @@ class Connect6Game:
 
     def generate_move(self, color):
         """Generates a random move for the computer."""
+        print("We have to move now", color, file=sys.stderr)
+        print(self.board, file=sys.stderr, flush=True)
+
+        def print_board():
+            for r in range(self.size):
+                print(" ".join(str(self.board[r, c]) for c in range(self.size)), file=sys.stderr)
+        # print_board()
         if self.game_over:
             print("? Game over")
             return
-
-        empty_positions = [(r, c) for r in range(self.size) for c in range(self.size) if self.board[r, c] == 0]
-        selected = random.sample(empty_positions, 1)
-        move_str = ",".join(f"{self.index_to_label(c)}{r+1}" for r, c in selected)
         
-        self.play_move(color, move_str)
+        # print("Generating move for ", color, file=sys.stderr)
+        # next_move, _ = mcts.mct_search(self.board, color)
 
-        print(f"{move_str}\n\n", end='', flush=True)
-        print(move_str, file=sys.stderr)
-        return
+        if self.board.sum() == 0:
+            move = random.sample([(r, c) for r in range(8, 10) for c in range(8, 10) if self.board[r, c] == 0], 1)
+            move_str = ",".join(f"{self.index_to_label(c)}{r+1}" for r, c in move)
+            print(f"{move_str}\n\n", end='', flush=True)
+            print(move_str, file=sys.stderr)
+        else:
+            sleep(1)
+
+            # Random two moves
+            # empty_positions = [(r, c) for r in range(self.size) for c in range(self.size) if self.board[r, c] == 0]
+            # next_move = random.sample(empty_positions, 2)
+
+            # MCTS
+            # print("mct search start", file=sys.stderr, flush=True)
+            next_move, _ = mcts.mct_search(self.board.copy(), 1 if color == 'B' else 2, debug=True)
+            # print("mct search end", file=sys.stderr, flush=True)
+
+            move_str = ",".join([f"{self.index_to_label(c)}{r+1}" for r, c in next_move])
+            print(f"{move_str}\n\n", end='', flush=True)
+            print(move_str, file=sys.stderr)
+
+            self.play_move(color, move_str)
+
+
+        # empty_positions = [(r, c) for r in range(self.size) for c in range(self.size) if self.board[r, c] == 0]
+        # selected = random.sample(empty_positions, 1)
+        # move_str = ",".join(f"{self.index_to_label(c)}{r+1}" for r, c in selected)
+        
+        # self.play_move(color, move_str)
+
+        # print(f"{move_str}\n\n", end='', flush=True)
+        # print(move_str, file=sys.stderr)
+        # return
     def show_board(self):
         """Displays the board as text."""
         print("= ")
@@ -134,6 +174,7 @@ class Connect6Game:
         """Parses and executes GTP commands."""
         command = command.strip()
         if command == "get_conf_str env_board_size:":
+            print(flush=True)
             print("env_board_size=19", flush=True)
 
         if not command:
@@ -161,6 +202,7 @@ class Connect6Game:
                 print("? Invalid genmove command format")
             else:
                 self.generate_move(parts[1])
+                print(flush=True)
         elif cmd == "showboard":
             self.show_board()
         elif cmd == "list_commands":
