@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import copy
 import random
 import math
+import torch
 
 
 class Game2048Env(gym.Env):
@@ -231,10 +232,142 @@ class Game2048Env(gym.Env):
         # If the simulated board is different from the current board, the move is legal
         return not np.array_equal(self.board, temp_board)
 
+class NTupleApproximator(torch.nn.Module):
+    def __init__(self, board_size, patterns):
+        """
+        Initializes the N-Tuple approximator.
+        Hint: you can adjust these if you want
+        """
+        super(NTupleApproximator, self).__init__()
+        self.board_size = board_size
+        self.patterns = patterns
+        # Create a weight dictionary for each pattern (shared within a pattern group)
+        self.weights = [np.zeros(16**len(pattern)) for pattern in patterns]
+        # Generate symmetrical transformations for each pattern
+        self.symmetry_patterns = []
+        for pattern in self.patterns:
+            syms = self.generate_symmetries(pattern)
+            self.symmetry_patterns.extend(syms)
+        # print(self.symmetry_patterns)
+        # print(len(self.symmetry_patterns))
+
+    def generate_symmetries(self, pattern):
+        # TODO: Generate 8 symmetrical transformations of the given pattern.
+        syms = []
+        a = np.zeros((4, 4))
+        pat = pattern
+        a = a.flatten()
+        a[pat] = 1
+        a = a.reshape(4, 4)
+
+        for _ in range(2):
+            for _ in range(4):
+                syms.append([i for i in range(16) if a.flatten()[i] == 1])
+                a = np.rot90(a)
+            a = a.T
+
+        return syms
+
+    def tile_to_index(self, tile):
+        """
+        Converts tile values to an index for the lookup table.
+        """
+        if tile == 0:
+            return 0
+        else:
+            return int(math.log(tile, 2))
+
+    def get_feature(self, board, coords):
+        feat_idx = 0
+        for cood in coords:
+            x = self.tile_to_index(board.flatten()[cood])
+            feat_idx = feat_idx * 16 + x
+        return feat_idx
+
+    def value(self, board):
+        """
+        Estimate the board value: sum the evaluations from all patterns.
+        """
+        if board.ndim == 2:
+            board_value = 0
+            for pi, pattern in enumerate(self.symmetry_patterns):
+                feat = self.get_feature(board, pattern)
+                board_value += self.weights[pi // 8][feat]
+        else:
+            raise ValueError("Invalid board dimension")
+        return board_value
+
+    def update(self, board, delta, alpha):
+        """
+        Update weights based on the TD error.
+        """
+        for pi, pattern in enumerate(self.symmetry_patterns):
+            feat = self.get_feature(board, pattern)
+            self.weights[pi // 8][feat] += alpha * delta
+    
+    def load(self, path):
+        self.weights = pickle.load(open(path, 'rb'))
+
+import pickle
+
+class Agent:
+    def __init__(self):
+        patterns = [
+            [0, 1, 2, 4, 5, 6],
+            [1, 2, 5, 6, 9, 13],
+            [0, 1, 2, 3, 4, 5],
+            [0, 1, 5, 6, 7, 10],
+            [0, 1, 2, 5, 9, 10],
+            [0, 1, 5, 9, 13, 14],
+            [0, 1, 5, 8, 9, 13],
+            [0, 1, 2, 4, 6, 10]
+        ]
+        self.value_approximator = NTupleApproximator(4, patterns)
+        self.value_approximator.load('best_model_weights.pkl')
+
+    def get_action(self, env):
+        sim_env = copy.deepcopy(env)
+
+        legal_actions = [i for i in range(4) if env.is_move_legal(i)]
+
+        best_action = None
+        best_value = float('-inf')
+        prev_score = env.score
+
+        for action in legal_actions:
+            sim_env2 = copy.deepcopy(sim_env)
+
+            if action == 0:
+                sim_env2.move_up()
+            elif action == 1:
+                sim_env2.move_down()
+            elif action == 2:
+                sim_env2.move_left()
+            elif action == 3:
+                sim_env2.move_right()
+            
+            afterstate = sim_env2.board.copy()
+            sim_env2 = copy.deepcopy(sim_env)
+            _, score, done, _ = sim_env2.step(action)
+            reward = score - prev_score
+
+            value = self.value_approximator.value(afterstate)
+
+            if value > best_value:
+                best_value = value
+                best_action = action
+
+        return best_action
+
+
+
+my_agent = Agent()
+
 def get_action(state, score):
     env = Game2048Env()
-    return random.choice([0, 1, 2, 3]) # Choose a random action
-    
-    # You can submit this random agent to evaluate the performance of a purely random strategy.
+    env.board = state
+    env.score = score
 
+    action = my_agent.get_action(env)
+    return action
 
